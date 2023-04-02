@@ -6,6 +6,8 @@ import threading
 from processor import start_processing
 import js2py
 import os
+import logging
+import time
 
 
 app = Flask(__name__)
@@ -14,6 +16,13 @@ config = {}
 key = 0
 collect = False
 
+# Stops flask from printing every request to the terminal
+log = logging.getLogger('werkzeug')
+log.disabled = True
+
+# Global variable for debugging times
+clock = time.perf_counter()
+print(clock)
 
 @app.route("/")
 def index():
@@ -95,7 +104,6 @@ def test():
             collect = True
         if c == "stop":
             collect = False
-        print(collect)
         return 'Success', 200
 
     # GET request (Get data from Arduino)
@@ -109,25 +117,33 @@ def test():
 
         else:
             # Get data from Arduino and parse
-            IMU, EMG = request.args.get('data').split(",")
+            incoming_data = request.args.get('data')[:-1].split(",")
+            IMU = incoming_data[::2]
+            EMG = incoming_data[1::2]
+            batch_size = len(IMU)
 
             # Update csv from values
             field_names = ['KEY','EMG','IMU']
-            row = [key, int(EMG), float(IMU)]
+            rows = [[key + i, int(EMG[i]), float(IMU[i])] for i in range(batch_size)]
             filepath = 'data\data.csv'
             directory = os.path.dirname(__file__)
             datafile = os.path.join(directory, filepath)
             with open(datafile, 'a', newline='') as csvfile:
                 writer = csv.writer(csvfile)
-                writer.writerow(row)
+                writer.writerows(rows)
                 csvfile.close()
 
             # Every 3000ms after 1500ms, call processor to process chunk and reset the raw data graphs
             if  key % 3000 == 0 and key != 0:
                 t1 = threading.Thread(target=start_processing(db, userID,key)).start()
                 #js2py.run_file("TremorWebsite\static\js\home.js") 
+
+            if key % 100 == 0 and key != 0:
+                global clock
+                print("Frequency:",str(100/(time.perf_counter()-clock)),"Hz")
+                clock = time.perf_counter()
                 
-            key += 1 # Update key
+            key += batch_size # Update key
 
         return 'Success'
 
@@ -138,7 +154,7 @@ def test():
 
 def run_flask():
     #Run app through port 5000 on 
-    app.run(debug=True, host='127.0.0.1', port=5000)
+    app.run(debug=True, host='192.168.86.20', port=5000)
 
 
 if __name__ == '__main__':

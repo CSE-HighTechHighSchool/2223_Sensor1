@@ -1,14 +1,13 @@
+
 /*
 Purpose:
  This sketch collects data from an Arduino sensor and sends it
  to a Flask server.  The Flask server will then update the corresonding
  Firebase realtime database.
-
 Notes:
  1.  This example is written for a network using WPA encryption. 
  2.  Circuit:  Arduino Nano IoT, HC_SR04 rangefinder.  Modify as 
      necessary for your setup.
-
 Instructions:
  1.  Replace the asterisks (***) with your specific network SSIS (network name) 
      and password on the "arduino_secrets.h" tab (these are case sensitive). DO NOT change lines 34 & 35.
@@ -52,7 +51,10 @@ WiFiClient client;
 IPAddress server(192,168,86,20); // for localhost server (server IP address can be found with ipconfig or ifconfig)
 
 unsigned long lastConnectionTime = 0;
-const unsigned long postingInterval = 1; // delay between updates, in milliseconds (10L * 50L is around 1 second between requests)
+const unsigned long postingInterval = 40; // delay between updates, in milliseconds (10L * 50L is around 1 second between requests)
+const unsigned long batchSize = 10; // postingInterval / batchSize = ms per data point
+double batchIMU[batchSize];
+int batchEMG[batchSize];
 
 void setup(){
   Serial.begin(115200); // Start serial monitor
@@ -64,9 +66,11 @@ void setup(){
   // Pin INPUTS/OUTPUT
   pinMode(EMG_SIG, INPUT);
 
+  // Set up IMU sensor
   if (!sox.begin_I2C(0x6B)) {
     Serial.println("Failed to connect to IMU (bad solder?)");
   }
+  sox.setAccelDataRate(LSM6DS_RATE_833_HZ);
 
   // check for the WiFi module:
   if (WiFi.status() == WL_NO_MODULE) {
@@ -106,32 +110,35 @@ void loop(){
     Serial.println(response);
   }
   
-  // repeat request after around 1 second
+  // repeat request
   if (millis() - lastConnectionTime > postingInterval) {
+    for (int i = 0; i < batchSize; i++) {
+      imu();
+      emg();
+      batchIMU[i] = resultant;
+      batchEMG[i] = muscle;
+    }
     httpRequest();
   }
 }
 
 // this method makes a HTTP connection to the server:
 void httpRequest() {
+  // note the time that the connection was made:
+  lastConnectionTime = millis();
 
   // close any connection before send a new request to free the socket
   client.stop();
-
-  // call emg() function to get emg voltages
-  emg();
-  Serial.println(muscle);  
-
-  // call imu() function to get emg voltages
-  imu(); 
-  Serial.println(resultant);
   
   // if there's a successful connection:
   if (client.connect(server, 5000)) {
-    Serial.println("connecting...");
+    //Serial.println("connecting...");
 
     // Parse data
-    String data = String(resultant) + "," + String(muscle);
+    String data = "";
+    for (int i = 0; i < batchSize; i++) {
+      data += String(batchIMU[i]) + "," + String(batchEMG[i]) + ",";
+    }
 
     // send the HTTP GET request with the distance as a parameter.
     // The Flask route to call should be inbetween the "/" and "?" (ex:  GET /test?...
@@ -147,12 +154,11 @@ void httpRequest() {
     client.println("User-Agent: ArduinoWiFi/1.1");
     client.println("Connection: close");
     client.println();
-
-    // note the time that the connection was made:
-    lastConnectionTime = millis();
   } else {
     Serial.println("connection failed"); // couldn't make a connection
   }
+
+  Serial.println("Connection length: " + String(millis() - lastConnectionTime));
 }
 
 // connect to wifi network and display status
