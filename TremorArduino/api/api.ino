@@ -30,11 +30,15 @@ Instructions:
 #include <Adafruit_LSM6DSOX.h>
 
 // Define global variables and constants for the circuit & sensor
+const int batchSize = 1000;
 int32_t accelerometer[3];
-double resultant;
+//double resultant;
 const int EMG_SIG = A6;
-int muscle;
+//int muscle;
 Adafruit_LSM6DSOX sox;
+double resultants[batchSize];
+double muscles[batchSize];
+int batchIndex = 0;
 
 
 ///////please enter your sensitive data in the Secret tab/arduino_secrets.h
@@ -109,16 +113,15 @@ void loop(){
   if (response != "") {
     Serial.println(response);
   }
+
+  // Collect data
+  emg();
+  imu();
+  batchIndex += 1;
   
-  // repeat request
-  if (millis() - lastConnectionTime > postingInterval) {
-    for (int i = 0; i < batchSize; i++) {
-      imu();
-      emg();
-      batchIMU[i] = resultant;
-      batchEMG[i] = muscle;
-    }
+  if (batchIndex == batchSize) {
     httpRequest();
+    batchIndex = 0;
   }
 }
 
@@ -137,7 +140,7 @@ void httpRequest() {
     // Parse data
     String data = "";
     for (int i = 0; i < batchSize; i++) {
-      data += String(batchIMU[i]) + "," + String(batchEMG[i]) + ",";
+      data += String(resultants[i]) + "," + String(muscles[i]) + ",";
     }
 
     // send the HTTP GET request with the distance as a parameter.
@@ -177,7 +180,7 @@ void printWifiStatus(){
 // collect emg values
 void emg(){
   // Read pin
-  muscle = analogRead(EMG_SIG);
+  muscles[batchIndex] = analogRead(EMG_SIG);
 }
 
 // collect imu values
@@ -188,5 +191,5 @@ void imu(){
   sox.getEvent(&accel, &gyro, &temp);
 
   // Calculate resultant acceleration
-  resultant = sqrt(sq(accel.acceleration.x)+sq(accel.acceleration.y)+sq(accel.acceleration.z));
+  resultants[batchIndex] = sqrt(sq(accel.acceleration.x)+sq(accel.acceleration.y)+sq(accel.acceleration.z));
 }
